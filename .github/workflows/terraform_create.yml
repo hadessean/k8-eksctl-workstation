@@ -1,1 +1,63 @@
+name: EKS Infrastructure
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Choose operation'
+        required: true
+        type: choice
+        options: [plan, create-workstation, create-cluster, destroy-cluster, destroy-workstation]
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: eks-infrastructure
+  cancel-in-progress: false
+env:
+  AWS_REGION: us-east-1
+  TF_IN_AUTOMATION: 'true'
+  TF_INPUT: 'false'
+jobs:
+  infrastructure:
+    runs-on: ubuntu-latest
+    environment: aws-infrastructure
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.13.4'
+      - name: Install eksctl
+        if: contains(inputs.action, 'cluster')
+        run: |
+          curl -fsSL https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_Linux_amd64.tar.gz -o /tmp/eksctl.tar.gz
+          tar -xzf /tmp/eksctl.tar.gz -C /tmp
+          sudo install /tmp/eksctl /usr/local/bin/eksctl
+          eksctl version
+      - name: Terraform init
+        if: inputs.action == 'plan' || contains(inputs.action, 'workstation')
+        run: terraform init -input=false
+      - name: Terraform validate
+        if: inputs.action == 'plan' || contains(inputs.action, 'workstation')
+        run: |
+          terraform fmt -check
+          terraform validate
+      - name: Terraform plan
+        if: inputs.action == 'plan'
+        run: terraform plan -input=false
+      - name: Create workstation
+        if: inputs.action == 'create-workstation'
+        run: terraform apply -auto-approve -input=false
+      - name: Create EKS cluster
+        if: inputs.action == 'create-cluster'
+        run: eksctl create cluster -f eks.yaml
+      - name: Destroy EKS cluster
+        if: inputs.action == 'destroy-cluster'
+        run: eksctl delete cluster -f eks.yaml --wait
+      - name: Destroy workstation
+        if: inputs.action == 'destroy-workstation'
+        run: terraform destroy -auto-approve -input=false
 
